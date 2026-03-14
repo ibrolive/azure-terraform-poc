@@ -1,0 +1,126 @@
+name: "Terraform – AMPLS"
+
+on:
+  push:
+    # Run on main AND on any branch that has an open PR (including feature
+    # branches like copilot/**), so fmt / init / validate execute before merge.
+    branches:
+      - main
+      - "copilot/**"
+      - "feature/**"
+    paths:
+      - "ampls/**"
+      - ".github/workflows/terraform-ampls.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "ampls/**"
+      - ".github/workflows/terraform-ampls.yml"
+  # Allows the workflow to be triggered manually from the Actions tab.
+  # Useful for re-running after the first-time-contributor approval, or for
+  # testing without a push.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write   # allows the plan step to post a PR comment
+
+env:
+  TF_WORKING_DIR: ampls
+
+jobs:
+  terraform:
+    name: "terraform init → validate → plan"
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: ${{ env.TF_WORKING_DIR }}
+
+    steps:
+      # -----------------------------------------------------------------------
+      # 1. Checkout
+      # -----------------------------------------------------------------------
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # -----------------------------------------------------------------------
+      # 2. Install Terraform
+      # -----------------------------------------------------------------------
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~1.7"
+
+      # -----------------------------------------------------------------------
+      # 3. Format check
+      # -----------------------------------------------------------------------
+      - name: Terraform fmt
+        id: fmt
+        run: terraform fmt -check -recursive -diff
+
+      # -----------------------------------------------------------------------
+      # 4. Init
+      # Provider download from the public Terraform Registry does not require
+      # Azure credentials.
+      # -----------------------------------------------------------------------
+      - name: Terraform init
+        id: init
+        run: terraform init -input=false
+
+      # -----------------------------------------------------------------------
+      # 5. Validate
+      # -----------------------------------------------------------------------
+      - name: Terraform validate
+        id: validate
+        run: terraform validate -no-color
+
+      # -----------------------------------------------------------------------
+      # 6. Plan  (only runs when Azure credentials are configured as secrets)
+      # To enable: add ARM_CLIENT_ID, ARM_CLIENT_SECRET, ARM_SUBSCRIPTION_ID
+      # and ARM_TENANT_ID in Settings → Secrets and variables → Actions.
+      # -----------------------------------------------------------------------
+      - name: Terraform plan
+        id: plan
+        if: ${{ secrets.ARM_CLIENT_ID != '' }}
+        run: terraform plan -no-color -input=false -out=tfplan
+        continue-on-error: true
+        env:
+          ARM_CLIENT_ID:       ${{ secrets.ARM_CLIENT_ID }}
+          ARM_CLIENT_SECRET:   ${{ secrets.ARM_CLIENT_SECRET }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+          ARM_TENANT_ID:       ${{ secrets.ARM_TENANT_ID }}
+
+      # -----------------------------------------------------------------------
+      # 7. Post plan output as a PR comment (pull_request events only)
+      # -----------------------------------------------------------------------
+      - name: Post plan to PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const planOutcome = '${{ steps.plan.outcome }}' || 'skipped (no Azure credentials configured)';
+            const planOutput  = '${{ steps.plan.outputs.stdout }}' || '_Plan was skipped — configure ARM_\\* secrets to enable it._';
+            const output = `#### Terraform Format and Style 🖌 \`${{ steps.fmt.outcome }}\`
+            #### Terraform Initialization ⚙️ \`${{ steps.init.outcome }}\`
+            #### Terraform Validation 🤖 \`${{ steps.validate.outcome }}\`
+            #### Terraform Plan 📖 \`${planOutcome}\`
+
+            <details><summary>Show Plan</summary>
+
+            \`\`\`terraform
+            ${planOutput}
+            \`\`\`
+
+            </details>
+
+            *Pushed by: @${{ github.actor }}, Action: \`${{ github.event_name }}\`*`;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            });
