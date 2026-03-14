@@ -2,8 +2,12 @@ name: "Terraform – AMPLS"
 
 on:
   push:
+    # Run on main AND on any branch that has an open PR (including feature
+    # branches like copilot/**), so fmt / init / validate execute before merge.
     branches:
       - main
+      - "copilot/**"
+      - "feature/**"
     paths:
       - "ampls/**"
       - ".github/workflows/terraform-ampls.yml"
@@ -14,7 +18,8 @@ on:
       - "ampls/**"
       - ".github/workflows/terraform-ampls.yml"
   # Allows the workflow to be triggered manually from the Actions tab.
-  # This is also useful for re-running after first-time-contributor approval.
+  # Useful for re-running after the first-time-contributor approval, or for
+  # testing without a push.
   workflow_dispatch:
 
 permissions:

@@ -158,9 +158,105 @@ A GitHub Actions workflow (`.github/workflows/terraform-ampls.yml`) runs automat
 1. **`terraform fmt -check`** – enforces canonical formatting
 2. **`terraform init`** – installs the AzureRM provider
 3. **`terraform validate`** – checks configuration syntax and semantics
-4. **`terraform plan`** – produces an execution plan (posted as a PR comment on pull requests)
+4. **`terraform plan`** – produces an execution plan (posted as a PR comment on pull requests; only runs when Azure credentials are configured)
 
-### Required GitHub Secrets
+---
+
+## Required Setup to Enable the CI Pipeline
+
+> Complete the steps below **before** merging. Steps 1–3 are needed for `fmt`, `init`, and `validate` to run. Step 4 is additionally needed for `terraform plan`.
+
+### Step 1 – Approve the Copilot bot's workflow runs (one-time)
+
+GitHub blocks workflow runs from first-time contributors (including bots) until a repository owner approves them.
+
+1. Go to your repository on GitHub.
+2. Click **Actions** in the top navigation bar.
+3. Find the workflow run that shows **"Waiting for approval"** or **"Action required"**.
+4. Click **"Approve and run"**.
+
+After this one-time approval the Copilot bot's future workflow runs will execute automatically.
+
+**Alternative (permanent):** Loosen the approval requirement for all future outside contributors:
+1. Go to **Settings → Actions → General**.
+2. Under *"Fork pull request workflows from outside collaborators"*, select **"Require approval for first time outside collaborators only"**.
+3. Click **Save**.
+
+### Step 2 – Verify Actions are enabled
+
+1. Go to **Settings → Actions → General**.
+2. Under *"Actions permissions"*, make sure **"Allow all actions and reusable workflows"** (or a suitable policy) is selected.
+3. Click **Save** if you made a change.
+
+### Step 3 – Confirm `fmt`, `init`, `validate` pass (no Azure credentials needed)
+
+Once the bot is approved (Step 1), push any small change to the `ampls/` directory. The `Terraform fmt`, `Terraform init`, and `Terraform validate` steps will run **without any Azure credentials** — these only need access to the public Terraform Registry.
+
+### Step 4 – Create an Azure Service Principal and add GitHub Secrets (enables `terraform plan`)
+
+The `terraform plan` step requires real Azure credentials. These are passed in as repository secrets.
+
+#### 4a – Create a Service Principal
+
+```bash
+# Log in
+az login
+
+# Create the service principal with Contributor + Resource Policy Contributor
+# on the target subscription
+az ad sp create-for-rbac \
+  --name "sp-github-terraform-ampls" \
+  --role "Contributor" \
+  --scopes "/subscriptions/<YOUR_SUBSCRIPTION_ID>" \
+  --sdk-auth
+```
+
+> If Azure Policy assignment is required (used in `policy.tf`), also assign **Resource Policy Contributor**:
+> ```bash
+> az role assignment create \
+>   --assignee <appId-from-above> \
+>   --role "Resource Policy Contributor" \
+>   --scope "/subscriptions/<YOUR_SUBSCRIPTION_ID>"
+> ```
+
+The command outputs JSON like:
+```json
+{
+  "clientId":       "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+  "clientSecret":   "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "subscriptionId": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+  "tenantId":       "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+}
+```
+
+#### 4b – Add the four secrets to GitHub
+
+1. Go to **Settings → Secrets and variables → Actions → New repository secret**.
+2. Create each secret below using the values from the JSON above:
+
+| Secret name | Value |
+|---|---|
+| `ARM_CLIENT_ID` | `clientId` from the JSON |
+| `ARM_CLIENT_SECRET` | `clientSecret` from the JSON |
+| `ARM_SUBSCRIPTION_ID` | `subscriptionId` from the JSON |
+| `ARM_TENANT_ID` | `tenantId` from the JSON |
+
+Once all four secrets are added, the `Terraform plan` step will run automatically on the next push or PR and post the plan output as a PR comment.
+
+---
+
+### Summary of what each step unlocks
+
+| Step | What it enables |
+|---|---|
+| 1 – Approve bot | `fmt`, `init`, `validate`, `plan` jobs actually execute |
+| 2 – Enable Actions | Workflow is allowed to run at all |
+| 3 – (no secrets needed) | `fmt ✅`, `init ✅`, `validate ✅` pass immediately |
+| 4 – Add ARM_\* secrets | `plan ✅` runs and posts output to PR comment |
+
+---
+
+### Required GitHub Secrets (reference)
 
 Configure these under **Settings → Secrets and variables → Actions**:
 
