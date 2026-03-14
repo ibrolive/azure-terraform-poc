@@ -13,6 +13,9 @@ on:
     paths:
       - "ampls/**"
       - ".github/workflows/terraform-ampls.yml"
+  # Allows the workflow to be triggered manually from the Actions tab.
+  # This is also useful for re-running after first-time-contributor approval.
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -54,15 +57,12 @@ jobs:
 
       # -----------------------------------------------------------------------
       # 4. Init
+      # Provider download from the public Terraform Registry does not require
+      # Azure credentials.
       # -----------------------------------------------------------------------
       - name: Terraform init
         id: init
         run: terraform init -input=false
-        env:
-          ARM_CLIENT_ID:       ${{ secrets.ARM_CLIENT_ID }}
-          ARM_CLIENT_SECRET:   ${{ secrets.ARM_CLIENT_SECRET }}
-          ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
-          ARM_TENANT_ID:       ${{ secrets.ARM_TENANT_ID }}
 
       # -----------------------------------------------------------------------
       # 5. Validate
@@ -72,12 +72,15 @@ jobs:
         run: terraform validate -no-color
 
       # -----------------------------------------------------------------------
-      # 6. Plan  (always run, even on push – output posted to PR comment)
+      # 6. Plan  (only runs when Azure credentials are configured as secrets)
+      # To enable: add ARM_CLIENT_ID, ARM_CLIENT_SECRET, ARM_SUBSCRIPTION_ID
+      # and ARM_TENANT_ID in Settings → Secrets and variables → Actions.
       # -----------------------------------------------------------------------
       - name: Terraform plan
         id: plan
+        if: ${{ secrets.ARM_CLIENT_ID != '' }}
         run: terraform plan -no-color -input=false -out=tfplan
-        continue-on-error: false
+        continue-on-error: true
         env:
           ARM_CLIENT_ID:       ${{ secrets.ARM_CLIENT_ID }}
           ARM_CLIENT_SECRET:   ${{ secrets.ARM_CLIENT_SECRET }}
@@ -93,15 +96,17 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
+            const planOutcome = '${{ steps.plan.outcome }}' || 'skipped (no Azure credentials configured)';
+            const planOutput  = '${{ steps.plan.outputs.stdout }}' || '_Plan was skipped — configure ARM_\\* secrets to enable it._';
             const output = `#### Terraform Format and Style 🖌 \`${{ steps.fmt.outcome }}\`
             #### Terraform Initialization ⚙️ \`${{ steps.init.outcome }}\`
             #### Terraform Validation 🤖 \`${{ steps.validate.outcome }}\`
-            #### Terraform Plan 📖 \`${{ steps.plan.outcome }}\`
+            #### Terraform Plan 📖 \`${planOutcome}\`
 
             <details><summary>Show Plan</summary>
 
             \`\`\`terraform
-            ${{ steps.plan.outputs.stdout }}
+            ${planOutput}
             \`\`\`
 
             </details>
